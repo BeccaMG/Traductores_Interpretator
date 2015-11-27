@@ -1,0 +1,480 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+
+#
+# Elaborado por:
+#    Oswaldo A. Jimenez 10-10368
+#    Rebeca Machado     10-10406
+#
+
+import ply.lex as lex
+import ply.yacc as yacc
+import sys
+
+import clases as myClass
+import SymTable as SymbolTable
+
+#******************************************************************************#
+#-----------------------------------LEXER--------------------------------------#
+#******************************************************************************#
+
+#Indica si existen o no errores lexicograficos
+global hayError 
+hayError = False
+
+# Palabras reservadas del lenguaje
+reserved = {
+  #Bloques
+  'begin'       : 'BEGIN',
+  'end'         : 'END',
+  'program'     : 'PROGRAM',
+  'declare'     : 'DECLARE',
+  'as'          : 'AS',
+  #Condicionales
+  'if'          : 'IF',
+  'then'        : 'THEN',
+  'else'        : 'ELSE',
+  'case'        : 'CASE',
+  'of'          : 'OF',
+  #Iteraciones
+  'for'         : 'FOR',
+  'in'          : 'IN',
+  'do'          : 'DO',
+  'while'       : 'WHILE',
+  #Lectura y escritura
+  'writeln'     : 'WRITELN',
+  'write'       : 'WRITE',
+  'read'        : 'READ',
+  #Tipos de datos
+  'int'         : 'INT',
+  'bool'        : 'BOOL',
+  'range'       : 'RANGE',
+  'true'        : 'TRUE',
+  'false'       : 'FALSE',
+  #Funciones
+  'rtoi'        : 'RTOI',
+  'length'      : 'LENGTH',
+  'top'         : 'TOP',
+  'bottom'      : 'BOTTOM',
+  #Operadores logicos
+  'or'          : 'OR',
+  'and'         : 'AND',
+  'not'         : 'NOT'
+}
+  
+# Lista de los tokens definidos de acuerdo a la precedencia de reconocimiento.
+tokens = [
+   'DOUBLEEQUAL',
+   'NOTEQUAL',
+   'CASETHEN',
+   'BELONGS',
+   'INTERSECTION',
+   'LESSEQTHAN',
+   'GREATEQTHAN',
+   'CONSTRUCTION',
+   'PLUS',
+   'MINUS',
+   'TIMES',
+   'DIVIDE',
+   'MOD',
+   'EQUAL',
+   'GREATERTHAN',
+   'LESSTHAN',
+   'NUM',
+   'LPAR',
+   'RPAR',
+   'COMMA',
+   'SEMICOLON',
+   'ID',
+   'STRING'   
+] + list(reserved.values())
+
+# Expresiones regulares para cada token
+t_DOUBLEEQUAL = r'=='
+t_NOTEQUAL    = r'\/='
+t_EQUAL       = r'='
+t_PLUS        = r'\+'
+t_CASETHEN    = r'-\>'
+t_BELONGS     = r'\>\>'
+t_INTERSECTION= r'\<\>'
+t_GREATEQTHAN = r'\>\='
+t_GREATERTHAN = r'\>'
+t_LESSEQTHAN  = r'\<\='
+t_LESSTHAN    = r'\<'
+t_MINUS       = r'-'
+t_TIMES       = r'\*'
+t_DIVIDE      = r'/'
+t_MOD         = r'%'
+t_LPAR        = r'\('
+t_RPAR        = r'\)'
+t_COMMA       = r','
+t_SEMICOLON   = r';'
+t_CONSTRUCTION= r'\.\.'
+
+
+def t_STRING(t):
+    r'"((\\")|(\\\\)|(\\n)|[^\\"\n])*"'
+    return t
+    
+# Definición de un número con expresiones regulares
+def t_NUM(t):
+  r'\d+'
+  try:
+      t.value = int(t.value)
+      #Caso en el que se ocurre un overflow o desbordamiento 
+      if ((t.value > sys.maxint) or (t.value < (-sys.maxint - 1)) ):
+          print("Integer value too large: %i linea:%i Columna:%i") %(t.value,t.lineno,calcularColumna(data,t))
+          global hayError
+          hayError = True
+  except ValueError:
+      print("Integer value too large: %i linea:%i Columna:%i") %(t.value,t.lineno,calcularColumna(data,t))
+      hayError = True
+  return t
+    
+# Definición de una variable o identificador con expresiones regulares
+def t_ID(t):
+  r'[a-zA-Z_][a-zA-Z_0-9]*'
+  t.type = reserved.get(t.value,'ID')    # Check for reserved words
+  return t
+
+# Definición de salto de línea (incluye formato Windows y Linux)
+def t_newline(t):
+    r'(\r\n)|\n'
+    t.lexer.lineno += 1
+
+# Caracteres a ignorar
+t_ignore  = ' \t'
+t_ignore_COMMENT = r'//.*'
+
+# Mensajes y manejador de errores
+def t_error(t):
+    print "Error: caracter inesperado \'%s\' en linea %i, columna %i." % (t.value[0], 
+                                                    t.lineno,calcularColumna(data,t))
+    t.lexer.skip(1)
+    
+    #Se indica la existencia de al menos un error lexicografico
+    global hayError 
+    hayError = True
+ 
+#Metodo que calcula el numero de columna del token relativo al archivo
+#pasado como argumento. 
+def calcularColumna(file,token):
+    newline = file.rfind('\n',0,token.lexpos)
+    if (newline < 0):
+	    newline = 0  
+	    
+    numColumna = (token.lexpos - newline)
+    return numColumna
+         
+# Construccion del lexer
+lexer = lex.lex()
+
+### Apetura del archivo input (solo lectura) ##
+if (len(sys.argv)<2): 
+    print "Modo de uso: " + sys.argv[0] + " <archivo_de_entrada>"
+    sys.exit()
+
+try:
+    myFile = open(sys.argv[1],'r')
+except IOError:
+    print "Error al abrir el archivo"  
+    sys.exit()
+
+### Se almacena el contenido completo de myFile en data
+data = myFile.read()
+
+### Cierre del archivo input ##
+myFile.close()
+
+# Entrada al lexer
+lexer.input(data)
+
+#Lista vacia. Se incluiran en ella los tokens validos encontrados
+tokenList = list();
+
+# Analisis de los tokens detectados 
+while True:
+    tok = lexer.token()   #Recuperacion del proximo token
+    if not tok: break     # Detenemos el bucle si no hay mas tokens por
+#procesar
+    tokenList.append(tok)
+    
+    
+    
+#******************************************************************************#
+#---------------------------------- PARSER ------------------------------------#
+#******************************************************************************#
+
+precedence = (
+    ('left','OR'),
+    ('left','AND'),
+    ('right','NOT'),
+    ('nonassoc','BELONGS'),
+    ('left','DOUBLEEQUAL','NOTEQUAL'),
+    ('nonassoc','LESSTHAN','LESSEQTHAN','GREATEQTHAN','GREATERTHAN'),
+    ('left','INTERSECTION'),
+    ('left','PLUS','MINUS'),
+    ('left','TIMES','DIVIDE','MOD'),
+    ('nonassoc','CONSTRUCTION'),
+    ('right','UMINUS')
+    )
+#******************************************************************************#
+#----------------------------- GRAMATICA --------------------------------------#
+#******************************************************************************# 
+def p_programa_inicial(p):
+    's : PROGRAM ins'
+    p[0] = myClass.program([p[2]])
+
+#******************************************************************************#
+#----------------------------- BLOQUE -----------------------------------------#
+#******************************************************************************#  
+def p_instr_bloque(p):
+    'ins : BEGIN bloque END'
+    p[0] = myClass.bloque(p[1],p[2],[3])
+      
+def p_bloque(p):
+    '''bloque : lins
+              | DECLARE ldec lins'''
+    if len(p) == 2:
+        p[0] = myClass.myPrint([p[1]])
+    elif len(p) == 4:
+        p[0] = myClass.declaracion(p[1],p[2],p[3])
+        
+        
+#******************************************************************************#
+#--------------------------- DECLARACION---------------------------------------#
+#******************************************************************************#          
+def p_lista_declaraciones(p):
+    '''ldec : dec
+            | dec SEMICOLON ldec'''
+    if len(p) == 2:
+        p[0] = myClass.myPrint([p[1]])
+    elif len(p) == 4:
+        p[0] = myClass.myPrint([p[1],p[3]])        
+            
+def p_lista_instrucciones(p):
+    '''lins : ins
+            | ins SEMICOLON lins'''
+    if len(p) == 2:
+        p[0] = myClass.myPrint([p[1]])
+    elif len(p) == 4:
+        p[0] = myClass.separador(p[1],p[2],p[3])    
+            
+def p_declaracion(p):
+    'dec : lvar AS tipo'
+    p[0] = myClass.listaDeclaraciones(p[1],p[2],p[3])
+    
+def p_lista_variables(p):
+    '''lvar : ID
+            | ID COMMA lvar'''
+    if len(p) == 2:
+        p[0] = myClass.Var(p[1],p)
+        
+    elif len(p) == 4:
+        p[0] = myClass.listaVariables(p[1],p[2],p[3],p)
+
+#******************************************************************************#
+#------------------------- TIPOS DE DATOS -------------------------------------#
+#******************************************************************************#         
+def p_tipo(p):
+    '''tipo : INT
+            | BOOL
+            | RANGE'''
+    p[0] = p[1]
+
+
+#******************************************************************************#
+#----------------------------- ASIGNACION -------------------------------------#
+#******************************************************************************#    
+def p_instr_asignacion(p):
+    'ins : ID EQUAL exp'
+    p[0] = myClass.asignacion(p[1],p[2],p[3],p)
+
+
+#******************************************************************************#
+#------------------------------ LECTURA ---------------------------------------#
+#******************************************************************************#  
+def p_instr_entrada(p):
+    'ins : READ ID'
+    p[0] = myClass.read(p[1],p[2],p)
+
+    
+#******************************************************************************#
+#----------------------------- ESCRITURA --------------------------------------#
+#******************************************************************************#            
+def p_instr_salida(p):
+    '''ins : WRITE lElem
+           | WRITELN lElem'''
+    p[0] = myClass.escritura(p[1],p[2])      
+           
+def p_lista_elementos(p):
+    '''lElem : elem
+            |  elem COMMA lElem'''
+    if len(p) == 2:
+        p[0] = myClass.myPrint([p[1]])
+    elif len(p) == 4:
+        p[0] = myClass.listaEscritura(p[1],p[2],p[3])           
+
+def p_elemento_isExpr(p):
+    '''elem : exp''' 
+    p[0] = myClass.myPrint([p[1]])
+    
+def p_elemento_isCadena(p):
+    '''elem : STRING'''
+    p[0] = myClass.constante_cadena(p[1]) 
+
+#******************************************************************************#
+#--------------------------- CONDICIONAL IF -----------------------------------#
+#******************************************************************************#            
+def p_instr_condicional_if(p):
+    'ins : IF exp THEN ins'
+    p[0] = myClass.condicional_if(p[1],p[2],p[3],p[4],p)
+    
+def p_instr_condicional_if_else(p):
+    'ins : IF exp THEN ins ELSE ins'
+    p[0] = myClass.condicional_if_else(p[1],p[2],p[3],p[4],p[5],p[6],p)          
+
+#******************************************************************************#
+#-------------------------- CONDICIONAL CASE ----------------------------------#
+#******************************************************************************#    
+def p_instr_condicional_case(p):
+    'ins : CASE exp OF lcaso END'
+    p[0] = myClass.case(p[1],p[2],p[3],p[4],p[5],p)
+    
+def p_lista_casos(p):
+    '''lcaso : caso SEMICOLON
+             | caso SEMICOLON lcaso'''
+    if len(p) == 3:
+        p[0] = myClass.myPrint([p[1]])
+    elif len(p) == 4:
+        p[0] = myClass.myPrint([p[1],p[3]]) 
+             
+def p_caso(p):
+    'caso : exp CASETHEN ins'
+    p[0] = myClass.listaCasos(p[1],p[2],p[3],p)
+
+
+#******************************************************************************#
+#----------------------- ITERACION DETERMINADA --------------------------------#
+#******************************************************************************# 
+def p_instr_iteracion_det(p):
+    'ins : FOR ID IN exp DO ins'
+    p[0] = myClass.iteracionDeterminada(p[1],p[5],p[6])
+    p[0].cargarRango(p[2],p[3],p[4],p)
+
+
+#******************************************************************************#
+#---------------------- ITERACION INDETERMINADA -------------------------------#
+#******************************************************************************# 
+def p_instr_iteracion_indet(p):
+    'ins : WHILE exp DO ins'
+    p[0] = myClass.iteracionIndeterminada(p[1],p[3],p[4])
+    p[0].cargarCondicion(p[2],p)
+
+
+#******************************************************************************#
+#----------------------------- FUNCIONES --------------------------------------#
+#******************************************************************************#  
+def p_funcion(p):
+    '''fun : RTOI exppar
+           | LENGTH exppar
+           | TOP exppar
+           | BOTTOM exppar'''
+    p[0] = myClass.funcion(p[1],p[2],p)
+           
+def p_expresion_paren(p):
+    'exppar : LPAR exp RPAR'
+    p[0] = myClass.myPrint([p[2]])
+
+
+#******************************************************************************#
+#---------------------------- CONSTANTES --------------------------------------#
+#******************************************************************************# 
+def p_constante_entera(p):
+    '''exp :  NUM'''
+    p[0] = myClass.constante_entera(p[1])  
+     
+def p_constante_bool(p):
+    '''exp : TRUE
+          | FALSE'''
+    p[0] = myClass.constante_booleana(p[1])
+    
+def p_variable(p):
+    '''exp : ID'''
+    p[0] = myClass.variable(p[1],p)
+
+
+#******************************************************************************#
+#---------------------------- EXPRESIONES -------------------------------------#
+#******************************************************************************#    
+def p_expresion(p):
+    '''exp : unOpe
+           | binOpe
+           | exppar
+           | fun'''
+    p[0] = myClass.myPrint([p[1]])
+
+            
+#******************************************************************************#
+#-------------------------- OPERADORES UNARIOS --------------------------------#
+#******************************************************************************#
+def p_operadores_unarios(p):
+    '''unOpe : MINUS exp %prec UMINUS
+             | NOT exp'''   
+             
+    p[0] = myClass.operadorUnario(p[1])
+    p[0].cargarOperando(p[2],p)          
+
+
+#******************************************************************************#
+#-------------------------- OPERADORES BINARIOS -------------------------------#
+#******************************************************************************#          
+def p_operadores_binarios(p):
+    '''binOpe : exp DOUBLEEQUAL exp
+           | exp NOTEQUAL exp
+           | exp BELONGS  exp
+           | exp INTERSECTION exp
+           | exp LESSEQTHAN   exp
+           | exp GREATEQTHAN  exp
+           | exp CONSTRUCTION exp
+           | exp PLUS  exp
+           | exp MINUS exp
+           | exp TIMES exp
+           | exp MOD   exp
+           | exp DIVIDE      exp
+           | exp LESSTHAN    exp
+           | exp GREATERTHAN exp
+           | exp AND exp
+           | exp OR exp'''
+    p[0]= myClass.operadorBin(p[2])
+    p[0].cargarOperando(p[1],p[3],p)
+    
+#------------------------------------------#
+    
+# Error rule for syntax errors
+def p_error(p):
+    global hayError
+    if p:
+        print "Error de sintaxis en linea %i, columna %i: token \"%s\" inesperado." % (p.lineno,calcularColumna(data,p),p.value)
+        hayError = True
+    else:
+        print "Error de sintaxis: fin de archivo inesperado."
+        hayError = True
+    
+# Reinicia el contador de lineas 
+lexer.lineno = 1
+
+# Build the parser
+parser = yacc.yacc()                              
+
+#se muestra el errror en caso de haber
+if not hayError:
+    hayError = False
+    result = parser.parse(data)
+    if not hayError:
+        result.setData(data)
+        ParserTable = SymbolTable.SymTable()
+        ParserTable.new()
+        result.setTable(ParserTable)
+        if not result.checkTipos():
+            result.ejecutar()
